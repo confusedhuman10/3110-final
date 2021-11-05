@@ -2,8 +2,10 @@ open OUnit2
 open Analyzer
 open Intake
 open WordProcessor
-open Sentiment
+open Stemmer
 open Str
+open WordEncoding
+open Yojson.Basic
 
 let state_test : test = "name" >:: fun _ -> assert_equal "" ""
 
@@ -61,13 +63,10 @@ let create_units_test
     (create_simplified_units (create_units word) "")
     ~printer:String.escaped
 
-let calc_vc_test
-    (name : string)
-    (char_string : string)
-    (expected_output : int) : test =
+let calc_vc_test (name : string) (word : string) (expected_output : int)
+    : test =
   name >:: fun _ ->
-  assert_equal expected_output (calc_vc char_string)
-    ~printer:string_of_int
+  assert_equal expected_output (calc_vc word) ~printer:string_of_int
 
 let remove_plurals_test
     (name : string)
@@ -80,21 +79,27 @@ let remove_plurals_test
 let remove_past_participles_test
     (name : string)
     (word : string)
-    (num_vc : int)
     (expected_output : string) : test =
   name >:: fun _ ->
   assert_equal expected_output
-    (remove_past_participles word num_vc)
+    (remove_past_participles word)
     ~printer:String.escaped
 
 let finalize_plurals_past_participles_test
     (name : string)
     (word : string)
-    (num_vc : int)
     (expected_output : string) : test =
   name >:: fun _ ->
   assert_equal expected_output
-    (finalize_plurals_past_participles word num_vc)
+    (finalize_plurals_past_participles word)
+    ~printer:String.escaped
+
+let replace_suffix_test
+    (name : string)
+    (word : string)
+    (expected_output : string) : test =
+  name >:: fun _ ->
+  assert_equal expected_output (replace_suffix word)
     ~printer:String.escaped
 
 let possesses : stemmed_word =
@@ -110,7 +115,7 @@ let agreed : stemmed_word =
     original_word = "agreed";
     units = "VCVC";
     num_vcs = 2;
-    stemmed = "agree";
+    stemmed = "agre";
   }
 
 let pp_stemmed_word stemmed =
@@ -282,6 +287,20 @@ let replace_suffix_test
   assert_equal expected_output (replace_suffix word)
     ~printer:String.escaped
 
+let fix_y_test
+    (name : string)
+    (word : string)
+    (expected_output : string) : test =
+  name >:: fun _ ->
+  assert_equal expected_output (fix_y word) ~printer:String.escaped
+
+let remove_e_test
+    (name : string)
+    (word : string)
+    (expected_output : string) : test =
+  name >:: fun _ ->
+  assert_equal expected_output (remove_e word) ~printer:String.escaped
+
 let word_processor_tests =
   [
     parse_test "Empty string" parse "" [];
@@ -385,42 +404,36 @@ let word_processor_tests =
     create_units_test "Numerous groups with different characters"
       "hkealolo" "CVCVCV";
     create_units_test "Does create_units work with possessive"
-      "possessive" "CVCVCVCV"; calc_vc_test "no VC" "CV" 0;
-    calc_vc_test "Empty string" "" 0; calc_vc_test "Odd length" "CVC" 1;
-    calc_vc_test "Even pairs" "VCVCVC" 3;
+      "possessive" "CVCVCVCV";
     remove_plurals_test "Ending with SSES" "possesses" "possess";
     remove_plurals_test "Ending with IES" "libraries" "librari";
-    remove_plurals_test "Ending with SS" "loneliness" "loneline";
+    remove_plurals_test "Ending with SS" "loneliness" "loneliness";
     remove_plurals_test "Ending with S" "cars" "car";
     remove_plurals_test "Not plural" "car" "car";
-    remove_past_participles_test "No VC with EED" "steed" 0 "steed";
-    remove_past_participles_test "Ending with EED" "agreed" 1 "agree";
-    remove_past_participles_test "Ending with ING" "wondering" 1
-      "wonder";
+    remove_past_participles_test "No VC with EED" "steed" "steed";
+    remove_past_participles_test "Ending with EED" "agreed" "agree";
+    remove_past_participles_test "Ending with ING" "wondering" "wonder";
     remove_past_participles_test "Ending with ING and no vowel in stem"
-      "wndring" 1 "wndring";
-    remove_past_participles_test "Ending with ED" "helped" 1 "help";
+      "wndring" "wndring";
+    remove_past_participles_test "Ending with ED" "helped" "help";
     remove_past_participles_test "Ending with ED and no vowel in stem"
-      "hlped" 1 "hlped";
+      "hlped" "hlped";
     finalize_plurals_past_participles_test
-      "Add e back after it has been removed" "conflat" 1 "conflate";
+      "Add e back after it has been removed" "conflat" "conflate";
     finalize_plurals_past_participles_test
-      "Add e back after it has been removed" "troubl" 1 "trouble";
+      "Add e back after it has been removed" "troubl" "trouble";
     finalize_plurals_past_participles_test
-      "Add e back after it has been removed from" "siz" 1 "size";
+      "Add e back after it has been removed from" "siz" "size";
     finalize_plurals_past_participles_test "Add e if stem is CVC" "fil"
-      1 "file";
+      "file";
     finalize_plurals_past_participles_test
-      "Do not add e is stem is CVC but length greater than 3" "fail" 1
+      "Do not add e is stem is CVC but length greater than 3" "fail"
       "fail"; stemmer_test "Stemming possesses" "possesses" possesses;
     stemmer_test "Stemming agreed -> agree" "agreed" agreed;
     create_units_test "Just seeing what" "H" "C";
     create_units_test "Creating unit for he CV" "He" "CV";
     process_sentence_test "Sentence with one word to stem"
       "He possesses the gem." "He possess the gem.";
-    process_sentence_test "Sentence with two words to stem"
-      "They agreed to visit libraries with me."
-      "They agree to visit librari with me.";
     (*These tests should pass, but spacing is causing them to act
       weird*)
     (* make_text_block_test "Sophomore clubs post" "I'm a sophomore and
@@ -523,38 +536,156 @@ let word_processor_tests =
     (*These last tests are in the case that there is no suffix change.*)
     replace_suffix_test "NO CHANGE" "hello" "hello";
     replace_suffix_test "NO CHANGE" "hi" "hi";
-  ]
-
-let sentiment_of_score score =
-  if score <= -0.05 then "Negative"
-  else if score >= 0.05 then "Positive"
-  else "Neutral"
-
-let sentiment_test
-    (name : string)
-    (text : string)
-    (expected_output : string) : test =
-  let _ = print_float (polarity_score text) in
-  name >:: fun _ ->
-  assert_equal expected_output
-    (sentiment_of_score (polarity_score text))
-    ~printer:String.escaped
-
-let sentiment_tests =
-  [
-    sentiment_test "Positive sentence"
-      "This is a very happy sentence that thrills me." "Positive";
-    sentiment_test "Neutral sentence"
-      "Cornell University is located in New York." "Neutral";
-    sentiment_test "Negative sentence" "I hate all of the snow."
-      "Negative";
+    replace_suffix_test "Choose step 4 but not step 3" "rational"
+      "ration";
+    fix_y_test "Replaces i with y if there is a vowel in the stem"
+      "party" "parti";
+    fix_y_test "Does not change word that does not end in y" "python"
+      "python";
+    fix_y_test "Does not change word without vowel" "sky" "sky";
+    remove_e_test "Removes e if number of VC's > 1" "debate" "debat";
+    remove_e_test "Does not remove e if number of VC's <= 1" "late"
+      "late";
+    remove_e_test
+      "Removes e if number of VC's = 1 and the stem ends CVC" "cease"
+      "ceas";
   ]
 
 let intake_tests = []
 
+let write_words_to_json_test
+    (name : string)
+    (words : string list)
+    (filename : string)
+    (expected_output : unit) : test =
+  let file = open_out ("data/subredditVocabJsons/" ^ filename) in
+  name >:: fun _ ->
+  assert_equal expected_output (write_words_to_json file words)
+
+let convert_path_to_json (file_path : string) = file_path |> from_file
+
+let cornell_json = convert_path_to_json "data/cornell.json"
+
+let cornell_json2 =
+  convert_path_to_json "data/subredditVocabJsons/cornell.json"
+
+let college_json = convert_path_to_json "data/college.json"
+
+let anime_json = convert_path_to_json "data/anime.json"
+
+let subreddit_json_to_word_json_test
+    (name : string)
+    (expected_output : unit)
+    (processor : Yojson.Basic.t -> string list)
+    (subreddit : Yojson.Basic.t) : test =
+  name >:: fun _ ->
+  assert_equal expected_output
+    (subreddit_json_to_word_json processor subreddit)
+
+let pp_print_matrix acc matrix : string =
+  Array.fold_right
+    (fun row acc ->
+      Array.fold_right (fun elt acc -> acc ^ string_of_int elt) row ""
+      ^ "\n")
+    matrix ""
+
+let encode_post_test
+    (name : string)
+    (vocab : t)
+    (processor : string -> string list)
+    (post : string)
+    (expected_output : int array) : test =
+  name >:: fun _ ->
+  assert_equal
+    (Array.to_list expected_output)
+    (Array.to_list (encode_post vocab processor post))
+
+let test3_json =
+  convert_path_to_json "data/subredditVocabJsons/test3.json"
+
+let test3_matrix = Array.make_matrix 2 5 0
+
+let _ = test3_matrix.(0).(0) <- 1
+
+let _ = test3_matrix.(1).(3) <- 1
+
+let cornell_test_1_matrix = Array.make 492 0
+
+let _ = cornell_test_1_matrix.(39) <- 1
+
+let _ = cornell_test_1_matrix.(40) <- 1
+
+let word_encoding_tests =
+  [
+    write_words_to_json_test
+      "Takes a list of words and writes to a\n       json file"
+      [ "Hello"; "Did"; "This"; "format"; "correctly" ]
+      "test3.json" (print_int 1);
+    subreddit_json_to_word_json_test
+      "Converts words in college\n\
+      \       subreddit posts to a json of all the  words" (print_int 1)
+      subreddit_json_to_words college_json;
+    subreddit_json_to_word_json_test
+      "Converts words in cornell\n\
+      \       subreddit posts to a json of all the  words" (print_int 1)
+      subreddit_json_to_stemmed_words cornell_json;
+    subreddit_json_to_word_json_test
+      "Converts words in anime\n\
+      \       subreddit posts to a json of all the  words" (print_int 1)
+      subreddit_json_to_stemmed_words anime_json;
+    (* create_encoded_matrix_test "Json contains: Hello, Did, this,
+       format, correctly. Test post \ is hello format" test3_json "Hello
+       format" test3_matrix; encode_post_test "Testing for Cornell.json"
+       cornell_json2 stem_text "attack basketball"
+       cornell_test_1_matrix *)
+  ]
+
+let rec pp_print_association_list assoc_list =
+  match assoc_list with
+  | [] -> ""
+  | (key, value) :: t ->
+      key ^ " -> " ^ string_of_int value ^ "\n"
+      ^ pp_print_association_list t
+
+let create_find_frequencies_test
+    (name : string)
+    (word_json : t)
+    (matrix : int array array)
+    (expected_output : (string * int) list) : test =
+  name >:: fun _ ->
+  assert_equal expected_output
+    (find_frequencies word_json matrix)
+    ~printer:pp_print_association_list
+
+let test4_matrix = Array.make_matrix 2 5 0
+
+let _ = test4_matrix.(0).(0) <- 1
+
+let _ = test4_matrix.(1).(0) <- 1
+
+let _ = test4_matrix.(1).(3) <- 1
+
+let statistics_tests =
+  [
+    create_find_frequencies_test "different words" test3_json
+      test3_matrix
+      [
+        ("format", 1); ("hello", 1); ("correctly", 0); ("this", 0);
+        ("did", 0);
+      ];
+    create_find_frequencies_test "repeated word" test3_json test4_matrix
+      [
+        ("hello", 2); ("format", 1); ("correctly", 0); ("this", 0);
+        ("did", 0);
+      ];
+  ]
+
 let suite =
   "test suite for Final"
   >::: List.flatten
-         [ intake_tests; word_processor_tests; sentiment_tests ]
+         [
+           intake_tests; word_processor_tests; word_encoding_tests;
+           statistics_tests;
+         ]
 
 let _ = run_test_tt_main suite

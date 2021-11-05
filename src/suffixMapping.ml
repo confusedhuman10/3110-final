@@ -1,3 +1,5 @@
+open Stemmer
+
 let step2_3data = Yojson.Basic.from_file "src/step2_3.json"
 
 let step4data = Yojson.Basic.from_file "src/step4.json"
@@ -25,11 +27,14 @@ let build_tables =
   |> assoc_list_to_hashtbl hashtbl_step2_3;
   step4data |> json_to_assoc_list |> assoc_list_to_hashtbl hashtbl_step4
 
-let rec find_suffix_binding tbl word =
+let rec find_suffix_binding tbl word remainder m =
   if String.length word < 2 then ("", 0)
   else
     match Hashtbl.find_opt tbl (word |> String.uppercase_ascii) with
-    | Some x -> (x |> String.lowercase_ascii, String.length word)
-    | None ->
+    | Some x when remainder |> calc_vc > m ->
+        (x |> String.lowercase_ascii, String.length word)
+    | _ ->
         find_suffix_binding tbl
           (String.sub word 1 (String.length word - 1))
+          (remainder ^ String.sub word 0 1)
+          m
